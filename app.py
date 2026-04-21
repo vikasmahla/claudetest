@@ -31,17 +31,15 @@ Output ONLY valid JSON with these exact keys:
 }"""
 
 
-def generate_for_product(company: str, product: str, website: str) -> dict:
+def generate_for_product(company: str, website: str) -> dict:
     """Use Claude with web search to generate cold email personalization."""
-    search_query = f"{company} {product} customer reviews site:reddit.com OR {website}"
-
-    user_message = f"""Research this product and generate cold email personalization:
+    user_message = f"""Research this company and generate cold email personalization:
 
 Company: {company}
-Product: {product}
 Website: {website}
 
-Search for customer reviews on Reddit and on their website. Find a niche, non-obvious angle.
+First visit their website to understand what they sell. Then search Reddit and review sites for customer discussions.
+Find a niche, non-obvious angle — a skepticism customers had before buying, or a surprising thing people love.
 Then output the JSON."""
 
     response = client.messages.create(
@@ -73,7 +71,7 @@ Then output the JSON."""
 
     # Fallback if JSON not found
     return {
-        "subject": f"ad creative idea for {product} (on us)",
+        "subject": f"ad creative idea for {company} (on us)",
         "observation": "Could not extract structured response.",
         "suggestion": "Please try again.",
     }
@@ -109,25 +107,22 @@ def generate():
                     return h
         return None
 
-    col_company = find_col(["company", "company name", "brand"])
-    col_product = find_col(["product", "product name", "item"])
-    col_website = find_col(["website", "url", "site", "link"])
+    col_company = find_col(["company", "company name", "brand", "name"])
+    col_website = find_col(["website", "url", "site", "link", "company website"])
 
     results = []
     for row in rows:
         company = row.get(col_company, "").strip() if col_company else ""
-        product = row.get(col_product, "").strip() if col_product else ""
         website = row.get(col_website, "").strip() if col_website else ""
 
-        if not company and not product:
+        if not company:
             continue
 
         try:
-            data = generate_for_product(company, product, website)
+            data = generate_for_product(company, website)
             results.append(
                 {
                     "company": company,
-                    "product": product,
                     "website": website,
                     "subject": data.get("subject", ""),
                     "observation": data.get("observation", ""),
@@ -139,7 +134,6 @@ def generate():
             results.append(
                 {
                     "company": company,
-                    "product": product,
                     "website": website,
                     "subject": "",
                     "observation": "",
@@ -155,18 +149,16 @@ def generate():
 def generate_single():
     body = request.get_json()
     company = body.get("company", "").strip()
-    product = body.get("product", "").strip()
     website = body.get("website", "").strip()
 
-    if not company and not product:
-        return jsonify({"error": "Company or product required"}), 400
+    if not company:
+        return jsonify({"error": "Company name is required"}), 400
 
     try:
-        data = generate_for_product(company, product, website)
+        data = generate_for_product(company, website)
         return jsonify(
             {
                 "company": company,
-                "product": product,
                 "website": website,
                 "subject": data.get("subject", ""),
                 "observation": data.get("observation", ""),

@@ -360,7 +360,7 @@
         </div>
 
         <p class="csv-hint">
-          Required columns: <code>company</code>, <code>product</code>, <code>website</code><br>
+          Required columns: <code>company</code>, <code>website</code><br>
           Column names are case-insensitive. Download a <a href="#" onclick="downloadSample(); return false;" style="color:var(--accent-light)">sample CSV</a>.
         </p>
 
@@ -379,15 +379,9 @@
 
       <!-- Single Tab -->
       <div id="tab-single" class="tab-panel">
-        <div class="form-row">
-          <div class="form-group">
-            <label for="s-company">Company Name</label>
-            <input type="text" id="s-company" placeholder="e.g. Graza" />
-          </div>
-          <div class="form-group">
-            <label for="s-product">Product Name</label>
-            <input type="text" id="s-product" placeholder="e.g. Drizzle Olive Oil" />
-          </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label for="s-company">Company Name</label>
+          <input type="text" id="s-company" placeholder="e.g. Graza" />
         </div>
         <div class="form-group">
           <label for="s-website">Website URL</label>
@@ -515,10 +509,9 @@
     // --- Single Submit ---
     async function submitSingle() {
       const company = document.getElementById('s-company').value.trim();
-      const product = document.getElementById('s-product').value.trim();
       const website = document.getElementById('s-website').value.trim();
 
-      if (!company && !product) { showAlert('single-alert', 'Enter a company or product name.', 'error'); return; }
+      if (!company) { showAlert('single-alert', 'Enter a company name.', 'error'); return; }
 
       const btn = document.getElementById('single-btn');
       setLoading(btn, true);
@@ -528,7 +521,7 @@
         const res = await fetch('/generate-single', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company, product, website })
+          body: JSON.stringify({ company, website })
         });
         const data = await res.json();
         if (!res.ok) { showAlert('single-alert', data.error || 'Server error', 'error'); return; }
@@ -564,14 +557,14 @@
           card.innerHTML = `
             <div class="result-company">
               <span class="result-company-name">${esc(r.company)}</span>
-              ${r.product ? `<span class="result-product-badge">${esc(r.product)}</span>` : ''}
+              ${r.website ? `<span class="result-product-badge">${esc(r.website)}</span>` : ''}
             </div>
             <div class="error-msg">Error: ${esc(r.error)}</div>`;
         } else {
           card.innerHTML = `
             <div class="result-company">
               <span class="result-company-name">${esc(r.company)}</span>
-              ${r.product ? `<span class="result-product-badge">${esc(r.product)}</span>` : ''}
+              ${r.website ? `<span class="result-product-badge">${esc(r.website)}</span>` : ''}
             </div>
             ${field('Subject', r.subject, true)}
             ${field('Observation', r.observation)}
@@ -612,7 +605,7 @@
     // --- Export ---
     function exportCSV() {
       if (!allResults.length) return;
-      const headers = ['company','product','website','subject','observation','suggestion','error'];
+      const headers = ['company','website','subject','observation','suggestion','error'];
       const rows = allResults.map(r => headers.map(h => `"${(r[h]||'').replace(/"/g,'""')}"`).join(','));
       const csv = [headers.join(','), ...rows].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -624,7 +617,7 @@
 
     // --- Sample CSV ---
     function downloadSample() {
-      const csv = `company,product,website\nGraza,Drizzle Olive Oil,https://graza.co\nAthlete's Foot,Recovery Cream,https://example.com`;
+      const csv = `company,website\nGraza,https://graza.co\nAthletic Greens,https://athleticgreens.com`;
       const blob = new Blob([csv], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
