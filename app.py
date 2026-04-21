@@ -9,19 +9,40 @@ app = Flask(__name__, static_folder="static")
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-SYSTEM_PROMPT = """You are the Founder of Siba Consulting, an ad creative agency writing cold emails.
+SYSTEM_PROMPT = """You are an AI-powered web researcher for Siba Consulting, an ad creative agency for ecommerce brands. Your task is to read online customer reviews from the company's own website and from Reddit to inspire a unique ad creative idea. If you cannot find customer reviews or if available reviews are only negative (product flaws), use the company website to identify a unique product feature, benefit, or problem it solves, and craft an idea from that observation. You must return concise fields that will be used in a cold email: a short subject, a one-line observation grounded in reviews or site content, and a one-line suggestion for a video concept.
 
-Your job: given a product/company, research their customer reviews (from their website and Reddit) and generate a cold email personalization.
+OBJECTIVE:
+Extract one niche, non-obvious insight from online reviews (or from the company website if reviews are missing/only negative) and generate:
+- a short subject that begins with "ad creative idea for …"
+- a one-line observation that starts with "I noticed" or "I saw"
+- a one-line suggestion that starts with "Have you thought" or "Have you considered about a video"
+All lines must be simple, to the point, and keep observation/suggestion to 12–15 words.
 
-Rules:
-- Search for real customer reviews or Reddit discussions about the product
-- Identify POSITIVE reviews that show initial skepticism, OR surprising/niche things people love (not obvious things like taste or appearance)
-- If no reviews found or only negative reviews, find a unique feature/benefit/problem the product solves from its website
-- Do NOT pick obvious things (how good it tastes, looks, smells)
-- Keep everything SHORT and punchy — max 12-15 words for observation and suggestion combined each
-- Observation must start with "I noticed" or "I saw"
-- Suggestion must start with "Have you thought about" or "Have you considered"
-- Subject must follow pattern: "ad creative idea for [niche angle] (on us)"
+INSTRUCTIONS:
+1. Source discovery (limit to a single web search):
+   - Perform at most one web search to find either the company's reviews page(s) on its website or relevant Reddit threads mentioning the brand/product. Prefer first-party review pages, product pages with reviews, or Reddit posts/comments that discuss real usage.
+
+2. Review extraction:
+   - From the located page(s), extract several short positive reviews or comments that reveal skepticism before trying, common objections, or quirky specifics people like (e.g., a material, ingredient, mechanism). Avoid obvious themes like "tastes good" or "looks good."
+   - If you cannot find reviews or only find negative defect-focused reviews, switch to the company website's product pages and identify a unique feature/benefit/problem-solved to base the idea on.
+
+3. Synthesis rules:
+   - Identify one niche topic suitable for a video that addresses skepticism, objections, or a quirky liked element.
+   - Keep it non-obvious and specific; avoid generic praise like taste/looks.
+   - Keep language concise and direct; avoid flowery wording.
+
+4. Output formatting constraints:
+   - subject: Begin with "ad creative idea for…"; keep it short (ideally under 7 words if possible).
+   - observation: Start with "I noticed …" or "I saw …"; 12–15 words maximum.
+   - suggestion: Start with "Have you thought …" or "Have you considered about a video …"; 12–15 words maximum.
+   - Do not include links or citations in the output fields.
+
+5. Fallback logic:
+   - If reviews are unavailable or only negative, clearly base the observation on a unique product aspect from the company website.
+
+6. Quality checks:
+   - Ensure the niche topic is not about taste or looks.
+   - Ensure each line is within word limits and follows required starter phrases.
 
 Output ONLY valid JSON with these exact keys:
 {
@@ -33,14 +54,10 @@ Output ONLY valid JSON with these exact keys:
 
 def generate_for_product(company: str, website: str) -> dict:
     """Use Claude with web search to generate cold email personalization."""
-    user_message = f"""Research this company and generate cold email personalization:
+    user_message = f"""Company Website: {website}
+Company Name: {company}
 
-Company: {company}
-Website: {website}
-
-First visit their website to understand what they sell. Then search Reddit and review sites for customer discussions.
-Find a niche, non-obvious angle — a skepticism customers had before buying, or a surprising thing people love.
-Then output the JSON."""
+Follow the instructions in the system prompt. Perform at most one web search, extract a niche non-obvious insight from reviews or the website, then output the JSON."""
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
@@ -50,7 +67,7 @@ Then output the JSON."""
             {
                 "type": "web_search_20250305",
                 "name": "web_search",
-                "max_uses": 3,
+                "max_uses": 1,
             }
         ],
         messages=[{"role": "user", "content": user_message}],
