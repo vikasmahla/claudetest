@@ -310,6 +310,31 @@
     }
     .export-btn:hover { border-color: var(--accent); color: var(--accent-light); }
 
+    select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      width: 100%;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    select:focus { border-color: var(--accent); }
+    select option { background: var(--surface2); }
+
+    /* Meta results */
+    .meta-stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 16px; }
+    @media (max-width: 480px) { .meta-stat-grid { grid-template-columns: 1fr; } }
+    .meta-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; }
+    .meta-stat-num { font-size: 26px; font-weight: 700; }
+    .meta-stat-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .meta-ad-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .meta-ad-item:last-child { margin-bottom: 0; }
+    .platform-badge { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 12px; display: inline-block; }
+
     /* Alert */
     .alert {
       padding: 12px 16px;
@@ -334,6 +359,7 @@
       <div class="tabs">
         <button class="tab active" onclick="switchTab('csv')">CSV Upload</button>
         <button class="tab" onclick="switchTab('single')">Single Product</button>
+        <button class="tab" onclick="switchTab('meta')">Meta Ads Checker</button>
       </div>
 
       <!-- CSV Tab -->
@@ -394,6 +420,70 @@
           <div class="spinner"></div>
           <span class="btn-label">Generate</span>
         </button>
+      </div>
+
+      <!-- Meta Ads Tab -->
+      <div id="tab-meta" class="tab-panel">
+        <div class="form-group" style="margin-bottom:12px">
+          <label for="meta-url">Company URL <span style="font-weight:400;color:var(--muted)">(website or Facebook page)</span></label>
+          <input type="url" id="meta-url" placeholder="https://facebook.com/nike  or  https://nike.com" />
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px">
+          <label for="meta-token">
+            Meta API Access Token
+            <button onclick="toggleTokenHelp()" style="background:none;border:none;color:var(--accent-light);font-size:11px;cursor:pointer;margin-left:6px;padding:0">How to get?</button>
+          </label>
+          <input type="password" id="meta-token" placeholder="EAAxxxxxxxxx..." />
+          <div id="token-help" style="display:none;margin-top:8px;font-size:12px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;line-height:1.7">
+            <strong style="color:var(--text)">Get a token in 30 seconds:</strong><br>
+            1. Go to <strong style="color:var(--accent-light)">developers.facebook.com/tools/explorer</strong><br>
+            2. Select any App (or use "Meta App" default)<br>
+            3. Click <strong style="color:var(--text)">Generate Access Token</strong> → log in<br>
+            4. Copy the token and paste it here<br>
+            <span style="color:var(--error)">Note: tokens expire in ~1 hour.</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="meta-country">Country</label>
+            <select id="meta-country">
+              <option value="US">United States</option>
+              <option value="GB">United Kingdom</option>
+              <option value="CA">Canada</option>
+              <option value="AU">Australia</option>
+              <option value="IN">India</option>
+              <option value="DE">Germany</option>
+              <option value="FR">France</option>
+              <option value="BR">Brazil</option>
+              <option value="MX">Mexico</option>
+              <option value="ES">Spain</option>
+              <option value="IT">Italy</option>
+              <option value="PH">Philippines</option>
+              <option value="ID">Indonesia</option>
+              <option value="NG">Nigeria</option>
+              <option value="ZA">South Africa</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="meta-status">Ad Status</label>
+            <select id="meta-status">
+              <option value="ALL">All Ads</option>
+              <option value="ACTIVE">Active Only</option>
+              <option value="INACTIVE">Inactive Only</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="meta-alert" class="alert"></div>
+
+        <button class="btn full" id="meta-btn" onclick="submitMetaCheck()">
+          <div class="spinner"></div>
+          <span class="btn-label">Check Meta Ads</span>
+        </button>
+
+        <div id="meta-results" style="display:none;margin-top:24px"></div>
       </div>
     </div>
 
@@ -623,6 +713,139 @@
       a.href = URL.createObjectURL(blob);
       a.download = 'sample-prospects.csv';
       a.click();
+    }
+
+    // ── Meta Ads Checker ──────────────────────────────────────────────────────
+
+    function toggleTokenHelp() {
+      const el = document.getElementById('token-help');
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function submitMetaCheck() {
+      const url = document.getElementById('meta-url').value.trim();
+      const token = document.getElementById('meta-token').value.trim();
+      const country = document.getElementById('meta-country').value;
+      const active_status = document.getElementById('meta-status').value;
+
+      if (!url) { showAlert('meta-alert', 'Please enter a URL.', 'error'); return; }
+      if (!token) { showAlert('meta-alert', 'Please enter your Meta access token.', 'error'); return; }
+
+      const btn = document.getElementById('meta-btn');
+      setLoading(btn, true);
+      hideAlert('meta-alert');
+      document.getElementById('meta-results').style.display = 'none';
+
+      try {
+        const res = await fetch('/check-meta-ads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, access_token: token, country, active_status })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAlert('meta-alert', data.error || 'Server error', 'error'); return; }
+        renderMetaResults(data);
+      } catch (err) {
+        showAlert('meta-alert', 'Network error: ' + err.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    }
+
+    const PLATFORM_ICONS = { facebook: '🔵', instagram: '🟣', messenger: '🟢', whatsapp: '🟩', audience_network: '🔶' };
+
+    function renderMetaResults(data) {
+      const container = document.getElementById('meta-results');
+      container.style.display = 'block';
+
+      const isRunning = data.active > 0;
+      const statusColor = isRunning ? 'var(--success)' : 'var(--error)';
+      const statusLabel = isRunning ? 'Running Ads' : 'No Active Ads';
+
+      // Page info
+      let pageHtml = '';
+      if (data.page) {
+        const p = data.page;
+        pageHtml = `
+          <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+            <div style="font-weight:700;font-size:17px">${esc(p.name || '')}${p.verified ? ' <span style="color:#1877f2;font-size:13px">✓ Verified</span>' : ''}</div>
+            ${p.category ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(p.category)}</div>` : ''}
+            ${p.fans != null ? `<div style="font-size:12px;color:var(--muted)">${Number(p.fans).toLocaleString()} followers</div>` : ''}
+          </div>`;
+      } else if (data.search_term) {
+        pageHtml = `<div style="font-size:13px;color:var(--muted);margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">Results for search: <strong style="color:var(--text)">"${esc(data.search_term)}"</strong></div>`;
+      }
+
+      // Platforms
+      const platformsHtml = (data.platforms || []).length
+        ? `<div style="margin-bottom:16px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:8px">Platforms</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              ${data.platforms.map(p => `<span class="platform-badge">${PLATFORM_ICONS[p] || '🔷'} ${p}</span>`).join('')}
+            </div>
+           </div>`
+        : '';
+
+      // Sample ads
+      const adsHtml = (data.sample_ads || []).map(ad => {
+        const body = (ad.ad_creative_bodies || [])[0] || (ad.ad_creative_link_titles || [])[0] || '';
+        const active = !ad.ad_delivery_stop_time;
+        const startDate = ad.ad_delivery_start_time ? new Date(ad.ad_delivery_start_time).toLocaleDateString() : '—';
+        const platforms = (ad.publisher_platforms || []).join(', ');
+        let impressionText = '';
+        if (ad.impressions) {
+          const lo = Number(ad.impressions.lower_bound).toLocaleString();
+          const hi = Number(ad.impressions.upper_bound).toLocaleString();
+          impressionText = `${lo}–${hi} impressions`;
+        }
+        return `
+          <div class="meta-ad-item">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span style="font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:${active ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.1)'};color:${active ? 'var(--success)' : 'var(--error)'}">${active ? 'Active' : 'Inactive'}</span>
+              <span style="font-size:11px;color:var(--muted)">Started ${startDate}</span>
+            </div>
+            ${body ? `<div style="font-size:13px;line-height:1.5;margin-bottom:8px;color:var(--text)">${esc(body.slice(0, 220))}${body.length > 220 ? '…' : ''}</div>` : ''}
+            <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted)">
+              ${platforms ? `<span>📱 ${esc(platforms)}</span>` : ''}
+              ${impressionText ? `<span>👁 ${impressionText}</span>` : ''}
+              ${ad.ad_snapshot_url ? `<a href="${esc(ad.ad_snapshot_url)}" target="_blank" rel="noopener" style="color:var(--accent-light);text-decoration:none">View ad →</a>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+          <div style="padding:20px;border-bottom:1px solid var(--border)">
+            ${pageHtml}
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+              <span style="width:10px;height:10px;border-radius:50%;background:${statusColor};display:inline-block;flex-shrink:0"></span>
+              <span style="font-weight:600;font-size:15px;color:${statusColor}">${statusLabel}</span>
+              ${data.capped ? '<span style="font-size:12px;color:var(--muted)">(500+ ads found, showing first 500)</span>' : ''}
+            </div>
+            <div class="meta-stat-grid">
+              <div class="meta-stat">
+                <div class="meta-stat-num" style="color:var(--text)">${data.total}${data.capped ? '+' : ''}</div>
+                <div class="meta-stat-label">Total Ads Found</div>
+              </div>
+              <div class="meta-stat">
+                <div class="meta-stat-num" style="color:var(--success)">${data.active}</div>
+                <div class="meta-stat-label">Active</div>
+              </div>
+              <div class="meta-stat">
+                <div class="meta-stat-num" style="color:var(--error)">${data.inactive}${data.capped ? '+' : ''}</div>
+                <div class="meta-stat-label">Inactive</div>
+              </div>
+            </div>
+            ${platformsHtml}
+          </div>
+          ${adsHtml ? `
+          <div style="padding:20px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:12px">Sample Ads (up to 8 shown)</div>
+            ${adsHtml}
+          </div>` : ''}
+        </div>`;
+
+      container.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   </script>
 </body>

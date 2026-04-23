@@ -1,7 +1,10 @@
 import os
 import json
+import re
 import csv
 import io
+import requests as http_requests
+from urllib.parse import urlparse, parse_qs
 from flask import Flask, request, jsonify, send_from_directory
 import anthropic
 
@@ -185,6 +188,141 @@ def generate_single():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Meta Ad Library ──────────────────────────────────────────────────────────
+
+META_GRAPH = "https://graph.facebook.com/v21.0"
+_FB_SKIP_PATHS = {"pages", "groups", "events", "marketplace", "watch", "gaming", "ads", "business", "help"}
+
+
+def _parse_fb_url(url):
+    """Return ('id'|'name', value) for a Facebook URL, or (None, None)."""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if "facebook.com" not in host and "fb.com" not in host:
+        return None, None
+    qs = parse_qs(parsed.query)
+    if "id" in qs:
+        return "id", qs["id"][0]
+    parts = [p for p in parsed.path.strip("/").split("/") if p]
+    if parts and parts[0].lower() not in _FB_SKIP_PATHS:
+        return "name", parts[0]
+    return None, None
+
+
+def _domain_to_term(url):
+    """Extract a bare company name from a website URL."""
+    parsed = urlparse(url)
+    host = parsed.netloc or parsed.path
+    host = re.sub(r"^www\.", "", host.lower())
+    return host.split(".")[0]
+
+
+def _lookup_page(identifier, token):
+    """Return (page_dict, error_str)."""
+    resp = http_requests.get(
+        f"{META_GRAPH}/{identifier}",
+        params={"fields": "id,name,fan_count,category,verification_status", "access_token": token},
+        timeout=15,
+    )
+    data = resp.json()
+    if "error" in data:
+        return None, data["error"].get("message", "Page lookup failed")
+    return data, None
+
+
+def _fetch_ad_library(token, country, active_status, page_id=None, search_term=None):
+    """Paginate the Ad Library and return aggregated stats."""
+    params = {
+        "ad_reached_countries": json.dumps([country]),
+        "ad_active_status": active_status,
+        "fields": "id,ad_creation_time,ad_creative_bodies,ad_creative_link_titles,"
+                  "ad_delivery_start_time,ad_delivery_stop_time,page_id,page_name,"
+                  "publisher_platforms,impressions,spend,ad_snapshot_url",
+        "limit": 100,
+        "access_token": token,
+    }
+    if page_id:
+        params["search_page_ids"] = page_id
+    elif search_term:
+        params["search_terms"] = search_term
+    else:
+        return None, "No search criteria provided"
+
+    all_ads, page_count, next_url, cap = [], 0, f"{META_GRAPH}/ads_archive", 5
+    while next_url and page_count < cap:
+        resp = http_requests.get(next_url, params=params if page_count == 0 else None, timeout=20)
+        data = resp.json()
+        if "error" in data:
+            if not all_ads:
+                return None, data["error"].get("message", "Ad Library API error")
+            break
+        all_ads.extend(data.get("data", []))
+        page_count += 1
+        next_url = data.get("paging", {}).get("next")
+
+    active = [a for a in all_ads if not a.get("ad_delivery_stop_time")]
+    platforms = sorted({p for a in all_ads for p in a.get("publisher_platforms", [])})
+    return {
+        "total": len(all_ads),
+        "capped": page_count >= cap and bool(next_url),
+        "active": len(active),
+        "inactive": len(all_ads) - len(active),
+        "platforms": platforms,
+        "sample_ads": all_ads[:8],
+    }, None
+
+
+@app.route("/check-meta-ads", methods=["POST"])
+def check_meta_ads():
+    body = request.get_json() or {}
+    url_input = body.get("url", "").strip()
+    token = body.get("access_token", "").strip() or os.environ.get("META_ACCESS_TOKEN", "")
+    country = body.get("country", "US")
+    active_status = body.get("active_status", "ALL")
+
+    if not url_input:
+        return jsonify({"error": "URL is required"}), 400
+    if not token:
+        return jsonify({"error": "Meta access token required"}), 400
+
+    if not url_input.startswith("http"):
+        url_input = "https://" + url_input
+
+    result = {"input": url_input}
+    page_id, search_term = None, None
+
+    id_type, value = _parse_fb_url(url_input)
+    if id_type and value:
+        page_data, err = _lookup_page(value, token)
+        if page_data:
+            result["page"] = {
+                "id": page_data.get("id"),
+                "name": page_data.get("name"),
+                "fans": page_data.get("fan_count"),
+                "category": page_data.get("category"),
+                "verified": page_data.get("verification_status") == "blue_verified",
+            }
+            page_id = page_data["id"]
+        else:
+            result["page_error"] = err
+            search_term = value
+    else:
+        search_term = _domain_to_term(url_input)
+
+    result["search_term"] = search_term or value
+
+    ads, err = _fetch_ad_library(
+        token, country, active_status,
+        page_id=page_id,
+        search_term=search_term if not page_id else None,
+    )
+    if err:
+        return jsonify({"error": err}), 400
+
+    result.update(ads)
+    return jsonify(result)
 
 
 if __name__ == "__main__":
